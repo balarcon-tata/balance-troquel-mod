@@ -4887,8 +4887,9 @@ async function cargarPlanCongeladoDesdeSupabase() {
   }
 }
 
-async function cargarSamsDesdeSupabase() {
+async function cargarSamsDesdeSupabase(forzar = false, silencioso = false) {
   if (cargandoSamsSupabase) return;
+  cargandoSamsSupabase = true;
 
   try {
     if (!supabaseBalance) throw new Error('No se pudo inicializar Supabase. Revise la conexión o la librería CDN.');
@@ -4897,15 +4898,19 @@ async function cargarSamsDesdeSupabase() {
     const file = document.getElementById('filenameSams');
     const card = document.getElementById('uploadCardSams');
 
-    // IMPORTANTE:
-    // La consulta optimizada por estilo era rápida, pero podía omitir rutas/SAMs
-    // cuando el programa no traía el mismo código de estilo que rutas_activas.
-    // Esta versión vuelve a cargar toda la tabla necesaria, pero en páginas y solo
-    // con las columnas mínimas para mantener el cálculo completo y acelerar la carga.
-    const firma = 'todas-las-rutas-compactas-v2';
-    if (estado.mapaSams && firmaUltimaConsultaSams === firma) {
+    // nexus-rutas-sync-v4: versioned, complete and stable route snapshots.
+    const leerVersionRutas = async () => {
+      const { data, error } = await supabaseBalance.from('control_actualizaciones')
+        .select('fecha_actualizacion,registros').eq('proceso', 'RUTAS_ACTIVAS').maybeSingle();
+      if (error) throw error;
+      if (!data || !data.fecha_actualizacion) throw new Error('No se pudo verificar la versión de rutas.');
+      return data;
+    };
+    const versionInicial = await leerVersionRutas();
+    const firma = 'nexus-rutas-sync-v4-' + versionInicial.fecha_actualizacion;
+    if (!forzar && estado.mapaSams && firmaUltimaConsultaSams === firma) {
       wb.sams = 'supabase';
-      intentarAutoBalance('rutas-ya-cargadas');
+      if (!silencioso) intentarAutoBalance('rutas-ya-cargadas');
       return;
     }
 
@@ -4914,7 +4919,7 @@ async function cargarSamsDesdeSupabase() {
     if (file) file.textContent = 'Supabase · consulta completa compacta';
     mostrarMensajeUpload('Consultando rutas activas completas desde Supabase...', 'wait');
 
-    const columnas = 'id_ruta,estilo,id_sam,etapa,id_operacion,operacion,secuencia,etapa_operacion,sam';
+    const columnas = 'id,id_ruta,estilo,id_sam,etapa,id_operacion,operacion,secuencia,etapa_operacion,sam';
     const pageSize = 1000;
 
     const { count, error: countError } = await supabaseBalance
@@ -4940,6 +4945,7 @@ async function cargarSamsDesdeSupabase() {
         return supabaseBalance
           .from('rutas_activas')
           .select(columnas)
+          .order('id', { ascending: true })
           .range(from, to);
       }));
 
@@ -4955,6 +4961,19 @@ async function cargarSamsDesdeSupabase() {
     if (!registros.length) {
       console.warn('Supabase no devolvió rutas activas. Revise tabla rutas_activas o políticas RLS.');
     }
+
+    const versionFinal = await leerVersionRutas();
+    if (versionInicial.fecha_actualizacion !== versionFinal.fecha_actualizacion ||
+        Number(versionInicial.registros) !== totalEsperado ||
+        Number(versionFinal.registros) !== totalEsperado) {
+      throw new Error('Las rutas cambiaron durante la consulta. Se reintentará automáticamente.');
+    }
+    const idsRecibidos = new Set(registros.map(r => r.id));
+    if (!totalEsperado || registros.length !== totalEsperado ||
+        idsRecibidos.size !== totalEsperado || registros.some(r => r.id == null)) {
+      throw new Error('Carga de rutas incompleta o duplicada. No se calculará con rutas parciales.');
+    }
+    idsRecibidos.clear();
 
     estado.mapaSams = procesarSamsDesdeSupabase(registros);
     if (!estado.mapaSams) estado.mapaSams = new Map();
@@ -4989,6 +5008,21 @@ async function cargarSamsDesdeSupabase() {
     cargandoSamsSupabase = false;
   }
 }
+
+// Check the import marker only; download routes again when its version changes.
+let revisionRutasAutomaticaEnCurso = false;
+async function revisarActualizacionRutasAutomatica() {
+  if (document.hidden || revisionRutasAutomaticaEnCurso || cargandoSamsSupabase || !wb.programa) return;
+  const botonBalance = document.getElementById('btnBalancear');
+  if (botonBalance && botonBalance.classList.contains('processing')) return;
+  revisionRutasAutomaticaEnCurso = true;
+  try { await cargarSamsDesdeSupabase(false, true); }
+  finally { revisionRutasAutomaticaEnCurso = false; }
+}
+setInterval(revisarActualizacionRutasAutomatica, 60000);
+document.addEventListener('visibilitychange', revisarActualizacionRutasAutomatica);
+window.addEventListener('focus', revisarActualizacionRutasAutomatica);
+
 
 /* ────────────────────────────────────────────────────────────
    PASO 3: CRUZAR DATOS
