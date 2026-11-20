@@ -8500,7 +8500,7 @@ procesarPrograma = function(workbook) {
     const unidades = iQty >= 0 ? celdaANumero(fila[iQty]) : 0;
     agregarRegistroSemana(semana, fila, unidades);
   }
-  const registros = [...mapa.values()].sort((a,b)=>a.semana-b.semana || String(a.linea).localeCompare(String(b.linea)) || String(a.orden).localeCompare(String(b.orden)));
+  const registros = [...mapa.values()].sort((a,b)=>MOD8_SEMANAS.indexOf(a.semana) - MOD8_SEMANAS.indexOf(b.semana) || String(a.linea).localeCompare(String(b.linea)) || String(a.orden).localeCompare(String(b.orden)));
   console.log(`MASTER PLAN TROQUEL 8S: ${esFormatoAncho ? 'formato ancho fechas->semanas' : 'Group=Troquel FCA93'} ${filasTroquelFCA93} filas | semanas ${MOD8_SEMANAS.join(",")}: ${registros.length} registros | fuera rango ${fueraSemana} | sin fecha ${sinFecha}`);
   return registros;
 };
