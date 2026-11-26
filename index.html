@@ -2086,7 +2086,7 @@ body.light-mode .simU-ops-item label {
 }
 .balance-visual-cards {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   padding: 14px 18px 4px;
 }
@@ -3144,7 +3144,11 @@ body.light-mode .mod8-daily-table td.green { background: #dcfce7 !important; col
 body.light-mode .mod8-daily-table td.red { background: #fee2e2 !important; color: #dc2626 !important; }
 body.light-mode .mod8-daily-table td.cost { background: #dcfce7 !important; color: #047857 !important; }
 </style>
-</head>
+<style>
+.troquel-desplegar { background:transparent;color:inherit;font:inherit;border:0;padding:4px 0;cursor:pointer;text-align:left }
+.troquel-detalle[hidden] { display:none!important }
+#efActualTroquel { width:5ch;box-sizing:content-box;font:inherit;color:inherit;background:transparent;border:0;border-bottom:1px solid currentColor }
+</style></head>
 <body>
 
   <div id="tooltipDetalle" class="tooltip-detalle" style="display:none;"></div>
@@ -8950,6 +8954,7 @@ function mod8InicializarTooltipOptimo() {
 }
 
 
+let cambiosTroquelAbiertos = false;
 function filasCambiosEstiloTroquel(fechas, celdas) {
   const dias = ['','Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
   const semanas = new Map(MOD8_SEMANAS.map(s => [Number(s), new Map()]));
@@ -8959,6 +8964,7 @@ function filasCambiosEstiloTroquel(fechas, celdas) {
     if (!semana.has(celda.dow)) semana.set(celda.dow, []);
     semana.get(celda.dow).push(celda);
   }
+  const porLinea = new Map();
   const anterior = new Map();
   const totales = new Map(), detalles = new Map();
   for (const [semana, grupos] of semanas) {
@@ -8968,14 +8974,23 @@ function filasCambiosEstiloTroquel(fechas, celdas) {
       let cambios = 0, valido = true;
       for (const celda of grupos.get(dia)) {
         const linea = String(celda.linea).trim().toUpperCase();
+        if (!porLinea.has(linea)) porLinea.set(linea, new Map());
+        const semanasLinea = porLinea.get(linea);
+        if (!semanasLinea.has(semana)) semanasLinea.set(semana, new Map());
+        const diasLinea = semanasLinea.get(semana);
+        if (!diasLinea.has(dia)) diasLinea.set(dia, 0);
         if (!linea || !celda.estiloCliente) {
+          diasLinea.set(dia, null);
           valido = false;
           if (linea) anterior.set(linea, null);
           continue;
         }
         if (anterior.has(linea)) {
-          if (anterior.get(linea) === null) valido = false;
-          else if (anterior.get(linea) !== celda.estiloCliente) cambios++;
+          if (anterior.get(linea) === null) { valido = false; diasLinea.set(dia, null); }
+          else if (anterior.get(linea) !== celda.estiloCliente) {
+            cambios++;
+            if (diasLinea.get(dia) !== null) diasLinea.set(dia, diasLinea.get(dia)+1);
+          }
         }
         anterior.set(linea, celda.estiloCliente);
       }
@@ -8989,7 +9004,22 @@ function filasCambiosEstiloTroquel(fechas, celdas) {
   const visibles = fechas.map(iso => Number(mod8SemanaDesdeIso(iso)));
   const valores = visibles.map(s => totales.get(s));
   const promedio = valores.length && valores.every(Number.isFinite) ? (valores.reduce((a,b)=>a+b,0)/valores.length).toFixed(1) : '—';
-  return '<tr title="S/D indica que faltan datos de línea o Estilo Cliente en el Masterplan"><th>CAMBIOS DE ESTILO POR SEMANA</th>'+valores.map(n=>'<td>'+(n ?? 'S/D')+'</td>').join('')+'<td>'+promedio+'</td></tr><tr><th>CAMBIOS DE ESTILO POR DÍA</th>'+visibles.map(s=>'<td>'+(detalles.get(s)||'—')+'</td>').join('')+'<td>—</td></tr>';
+  const oculto = cambiosTroquelAbiertos ? '' : ' hidden';
+  const boton = '<button type="button" class="troquel-desplegar" aria-expanded="'+cambiosTroquelAbiertos+'"><span aria-hidden="true">'+(cambiosTroquelAbiertos?'▾':'▸')+'</span> CAMBIOS DE ESTILO POR SEMANA</button>';
+  let html = '<tr><th>'+boton+'</th>'+valores.map(n=>'<td>'+(n ?? 'S/D')+'</td>').join('')+'<td>'+promedio+'</td></tr>';
+  html += '<tr class="troquel-detalle"'+oculto+'><th>CAMBIOS DE ESTILO POR DÍA</th>'+visibles.map(s=>'<td>'+(detalles.get(s)||'—')+'</td>').join('')+'<td>—</td></tr>';
+  for (const linea of [...porLinea.keys()].sort((a,b)=>a.localeCompare(b,'es',{numeric:true}))) {
+    html += '<tr class="troquel-detalle"'+oculto+'><th>'+esc(linea || 'Sin línea')+'</th>';
+    for (const semana of visibles) {
+      const diasLinea = porLinea.get(linea).get(semana);
+      if (!diasLinea) { html += '<td>—</td>'; continue; }
+      const valoresDia = [...diasLinea.values()];
+      const suma = valoresDia.every(Number.isFinite) ? valoresDia.reduce((a,b)=>a+b,0) : 'S/D';
+      html += '<td><strong>Semana '+suma+'</strong><br>'+[...diasLinea].map(([d,n])=>dias[d]+' '+(n ?? 'S/D')).join('<br>')+'</td>';
+    }
+    html += '<td>—</td></tr>';
+  }
+  return html;
 }
 
 renderizarResumenVisualBalance = function() {
@@ -9057,7 +9087,13 @@ renderizarResumenVisualBalance = function() {
   const fechaIni = nombreEncabezadoDia(fechas[0]); const fechaFin = nombreEncabezadoDia(fechas[fechas.length-1]);
   if (sub) sub.textContent = `${fechaIni} a ${fechaFin} · ${operaciones.length} operaciones con HC`;
   badges.innerHTML = `<span class="balance-visual-badge">Fuente <strong>${fuenteActiva === 'proyeccion' ? 'Proyección' : 'Programa'}</strong></span><span class="balance-visual-badge">Operaciones <strong>${operaciones.length}</strong></span><span class="balance-visual-badge">HC óptimo prom. <strong>${optimo.promedio.toFixed(1)}</strong></span>`;
-  cards.innerHTML = `<div class="balance-visual-card"><span>Mayor carga semanal</span><strong>${totalPorSemana[isoMayor].toFixed(1)}</strong><em>${nombreEncabezadoDia(isoMayor)}</em></div><div class="balance-visual-card"><span>Operación crítica</span><strong>${operacionMayor.promedio.toFixed(1)}</strong><em>${esc(operacionMayor.operacion)} · promedio 8 semanas</em></div><div class="balance-visual-card"><span>HC óptimo promedio</span><strong>${optimo.promedio.toFixed(1)}</strong><em>HE estimadas ${optimo.heTotal.toFixed(1)}h · $${optimo.costoTotal.toFixed(0)}</em></div><div class="balance-visual-card"><span>Semanas evaluadas</span><strong>${fechas.length}</strong><em>${fechaIni} → ${fechaFin}</em></div>`;
+  cards.innerHTML = `<div class="balance-visual-card"><span>Mayor carga semanal</span><strong>${totalPorSemana[isoMayor].toFixed(1)}</strong><em>${nombreEncabezadoDia(isoMayor)}</em></div><div class="balance-visual-card"><span><label for="efActualTroquel">Eficiencia Actual</label></span><strong><input id="efActualTroquel" type="number" min="0" step="any" placeholder="—"> %</strong><em>Registro manual</em></div><div class="balance-visual-card"><span>Operación crítica</span><strong>${operacionMayor.promedio.toFixed(1)}</strong><em>${esc(operacionMayor.operacion)} · promedio 8 semanas</em></div><div class="balance-visual-card"><span>HC óptimo promedio</span><strong>${optimo.promedio.toFixed(1)}</strong><em>HE estimadas ${optimo.heTotal.toFixed(1)}h · $${optimo.costoTotal.toFixed(0)}</em></div><div class="balance-visual-card"><span>Semanas evaluadas</span><strong>${fechas.length}</strong><em>${fechaIni} → ${fechaFin}</em></div>`;
+  const eficienciaActual = cards.querySelector('#efActualTroquel');
+  const claveEficiencia = 'troquel-mod.eficienciaActual';
+  eficienciaActual.value = localStorage.getItem(claveEficiencia) || '';
+  eficienciaActual.onchange = () => {
+    if (eficienciaActual.reportValidity()) localStorage.setItem(claveEficiencia, eficienciaActual.value);
+  };
   const thDias = fechas.map(iso => `<th>${nombreEncabezadoDia(iso)}</th>`).join('');
   const rows = operaciones.map(r => {
     const dias = fechas.map(iso => { const v = r.dias[iso] || 0; const scale = Math.max(.06, Math.min(1, v / maxCelda)); return `<td class="balance-visual-cell">${v > 0 ? v.toFixed(2) : '—'}${v > 0 ? `<span class="hc-bar" style="transform:scaleX(${scale})"></span>` : ''}</td>`; }).join('');
@@ -9121,6 +9157,13 @@ renderizarResumenVisualBalance = function() {
   const totalSubRows = ''; // área única Troquel: sin desglose desplegable
   const optSubRows = ''; // área única Troquel: sin desglose desplegable
   tabla.innerHTML = `<table class="balance-visual-table"><thead><tr><th>Operación</th>${thDias}<th>Prom. semanal</th></tr></thead><tbody>${rows}<tr class="balance-visual-total-row"><th>TOTAL HC / SEMANA</th>${totalRow}<td>${promedioSemana.toFixed(2)}</td></tr>${totalSubRows}<tr class="balance-visual-optimo-row"><th>HC ÓPTIMO</th>${optRow}<td>${optimo.promedio.toFixed(1)}</td></tr>${optSubRows}<tr class="balance-visual-eficiencia-proyectada-row"><th>EFICIENCIA PROYECTADA</th>${eficienciaProyectadaRow}<td>${eficienciaProyectadaProm>0?(eficienciaProyectadaProm*100).toFixed(1)+'%':'—'}</td></tr><tr class="balance-visual-unidades-row"><th>TOTAL UNIDADES</th>${unidadesRow}<td>${promedioUnidades > 0 ? Math.round(promedioUnidades).toLocaleString('en-US') : '—'}</td></tr><tr class="balance-visual-cost-unit-row"><th>COSTO UNIT. TROQUEL</th>${costoUnitEnsRow}<td>${costoUnitEnsProm}</td></tr><tr class="balance-visual-sam-row"><th>SAM PONDERADO</th>${samRow}<td>${samPonderado > 0 ? samPonderado.toFixed(2) : '—'}</td></tr>${fuenteActiva === 'proyeccion' ? '' : filasCambiosEstiloTroquel(fechas, mod8TroquelCeldasDiarias)}</tbody></table>`;
+  const desplegar = tabla.querySelector('.troquel-desplegar');
+  if (desplegar) desplegar.onclick = () => {
+    cambiosTroquelAbiertos = !cambiosTroquelAbiertos;
+    desplegar.setAttribute('aria-expanded', String(cambiosTroquelAbiertos));
+    desplegar.firstElementChild.textContent = cambiosTroquelAbiertos ? '▾' : '▸';
+    tabla.querySelectorAll('.troquel-detalle').forEach(fila => fila.hidden = !cambiosTroquelAbiertos);
+  };
   window.__TROQUELMOD_SNAPSHOT = fechas.map(iso => {
     const semana = mod8SemanaDesdeIso(iso);
     const unidades = Number(unidadesProgramadasPorSemana[iso] || 0);
