@@ -8950,6 +8950,48 @@ function mod8InicializarTooltipOptimo() {
 }
 
 
+function filasCambiosEstiloTroquel(fechas, celdas) {
+  const dias = ['','Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+  const semanas = new Map(MOD8_SEMANAS.map(s => [Number(s), new Map()]));
+  for (const celda of celdas) {
+    const semana = semanas.get(celda.semana);
+    if (!semana || esLineaExcluida(celda.linea)) continue;
+    if (!semana.has(celda.dow)) semana.set(celda.dow, []);
+    semana.get(celda.dow).push(celda);
+  }
+  const anterior = new Map();
+  const totales = new Map(), detalles = new Map();
+  for (const [semana, grupos] of semanas) {
+    let total = 0, completo = grupos.size > 0;
+    const detalle = [];
+    for (const dia of [...grupos.keys()].sort((a,b)=>a-b)) {
+      let cambios = 0, valido = true;
+      for (const celda of grupos.get(dia)) {
+        const linea = String(celda.linea).trim().toUpperCase();
+        if (!linea || !celda.estiloCliente) {
+          valido = false;
+          if (linea) anterior.set(linea, null);
+          continue;
+        }
+        if (anterior.has(linea)) {
+          if (anterior.get(linea) === null) valido = false;
+          else if (anterior.get(linea) !== celda.estiloCliente) cambios++;
+        }
+        anterior.set(linea, celda.estiloCliente);
+      }
+      completo &&= valido;
+      total += cambios;
+      detalle.push(dias[dia]+' '+(valido ? cambios : 'S/D'));
+    }
+    totales.set(semana, completo ? total : null);
+    detalles.set(semana, detalle.join('<br>'));
+  }
+  const visibles = fechas.map(iso => Number(mod8SemanaDesdeIso(iso)));
+  const valores = visibles.map(s => totales.get(s));
+  const promedio = valores.length && valores.every(Number.isFinite) ? (valores.reduce((a,b)=>a+b,0)/valores.length).toFixed(1) : '—';
+  return '<tr title="S/D indica que faltan datos de línea o Estilo Cliente en el Masterplan"><th>CAMBIOS DE ESTILO POR SEMANA</th>'+valores.map(n=>'<td>'+(n ?? 'S/D')+'</td>').join('')+'<td>'+promedio+'</td></tr><tr><th>CAMBIOS DE ESTILO POR DÍA</th>'+visibles.map(s=>'<td>'+(detalles.get(s)||'—')+'</td>').join('')+'<td>—</td></tr>';
+}
+
 renderizarResumenVisualBalance = function() {
   const section = document.getElementById('balanceResumenVisual');
   const badges  = document.getElementById('balanceResumenVisualBadges');
@@ -9078,7 +9120,7 @@ renderizarResumenVisualBalance = function() {
   const optCaret = mod8OptimoExpandido ? '▾' : '▸';
   const totalSubRows = ''; // área única Troquel: sin desglose desplegable
   const optSubRows = ''; // área única Troquel: sin desglose desplegable
-  tabla.innerHTML = `<table class="balance-visual-table"><thead><tr><th>Operación</th>${thDias}<th>Prom. semanal</th></tr></thead><tbody>${rows}<tr class="balance-visual-total-row"><th>TOTAL HC / SEMANA</th>${totalRow}<td>${promedioSemana.toFixed(2)}</td></tr>${totalSubRows}<tr class="balance-visual-optimo-row"><th>HC ÓPTIMO</th>${optRow}<td>${optimo.promedio.toFixed(1)}</td></tr>${optSubRows}<tr class="balance-visual-eficiencia-proyectada-row"><th>EFICIENCIA PROYECTADA</th>${eficienciaProyectadaRow}<td>${eficienciaProyectadaProm>0?(eficienciaProyectadaProm*100).toFixed(1)+'%':'—'}</td></tr><tr class="balance-visual-unidades-row"><th>TOTAL UNIDADES</th>${unidadesRow}<td>${promedioUnidades > 0 ? Math.round(promedioUnidades).toLocaleString('en-US') : '—'}</td></tr><tr class="balance-visual-cost-unit-row"><th>COSTO UNIT. TROQUEL</th>${costoUnitEnsRow}<td>${costoUnitEnsProm}</td></tr><tr class="balance-visual-sam-row"><th>SAM PONDERADO</th>${samRow}<td>${samPonderado > 0 ? samPonderado.toFixed(2) : '—'}</td></tr></tbody></table>`;
+  tabla.innerHTML = `<table class="balance-visual-table"><thead><tr><th>Operación</th>${thDias}<th>Prom. semanal</th></tr></thead><tbody>${rows}<tr class="balance-visual-total-row"><th>TOTAL HC / SEMANA</th>${totalRow}<td>${promedioSemana.toFixed(2)}</td></tr>${totalSubRows}<tr class="balance-visual-optimo-row"><th>HC ÓPTIMO</th>${optRow}<td>${optimo.promedio.toFixed(1)}</td></tr>${optSubRows}<tr class="balance-visual-eficiencia-proyectada-row"><th>EFICIENCIA PROYECTADA</th>${eficienciaProyectadaRow}<td>${eficienciaProyectadaProm>0?(eficienciaProyectadaProm*100).toFixed(1)+'%':'—'}</td></tr><tr class="balance-visual-unidades-row"><th>TOTAL UNIDADES</th>${unidadesRow}<td>${promedioUnidades > 0 ? Math.round(promedioUnidades).toLocaleString('en-US') : '—'}</td></tr><tr class="balance-visual-cost-unit-row"><th>COSTO UNIT. TROQUEL</th>${costoUnitEnsRow}<td>${costoUnitEnsProm}</td></tr><tr class="balance-visual-sam-row"><th>SAM PONDERADO</th>${samRow}<td>${samPonderado > 0 ? samPonderado.toFixed(2) : '—'}</td></tr>${fuenteActiva === 'proyeccion' ? '' : filasCambiosEstiloTroquel(fechas, mod8TroquelCeldasDiarias)}</tbody></table>`;
   window.__TROQUELMOD_SNAPSHOT = fechas.map(iso => {
     const semana = mod8SemanaDesdeIso(iso);
     const unidades = Number(unidadesProgramadasPorSemana[iso] || 0);
@@ -9589,6 +9631,7 @@ if (document.readyState === 'loading') {
       const iFecha = encontrarCol(hn, ['DATE ON PLAN DAY','PLAN DAY','FECHA PRODUCCION','FECHA PRODUCCIÓN','FECHA']);
       const iQty   = encontrarCol(hn, ['QUANTITY ON PLAN DAY','QTY ON PLAN DAY','CANTIDAD','QUANTITY','QTY']);
       const iEstilo= encontrarCol(hn, ['ESTILO','STYLE','STYLE NUMBER','CODIGO ESTILO','COD ESTILO']);
+      const iEstiloCliente = headers.findIndex(h => ['ESTILOCLIENTE','ESTILODECLIENTE','ESTILODELCLIENTE','CUSTOMERSTYLE','CUSTOMERSTYLENUMBER','CLIENTSTYLE'].includes(String(h ?? '').toUpperCase().replace(/[^A-Z0-9]/g,'')));
       const celdas = [];
 
       const colsFechaPlan = [];
@@ -9610,6 +9653,7 @@ if (document.readyState === 'loading') {
         const estiloRaw = String(iEstilo >= 0 && fila[iEstilo] != null ? fila[iEstilo] : '').trim();
         if (!linea && !orden && !estiloRaw) return;
         celdas.push({
+          estiloCliente: String(fila[iEstiloCliente] ?? '').trim().toUpperCase(),
           semana:Number(semana),
           dow:Number(dow),
           iso:mod8LabelSemana(semana),
